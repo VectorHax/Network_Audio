@@ -108,4 +108,4 @@ venv.bak/
 *.wav
 
 #The python virtual env
-python_env/
+network_env/
