@@ -106,3 +106,6 @@ venv.bak/
 #Audio files
 /audio
 *.wav
+
+#The python virtual env
+python_env/

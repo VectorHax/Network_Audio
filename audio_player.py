@@ -1,210 +1,271 @@
-# The new audio player with call back
+# audio_player.py
+# Created by: Dale Best
+# Created on: December 22nd, 2018
 
-import queue
-import pyaudio
-import pydub
-import time
-import datetime
-import wave
-import threading
-import math
+import sys
+
+try:
+  # The global native python imports
+  import datetime
+  import math
+  import queue
+  import threading
+  import time
+  import wave
+
+  # The imports brought in via pip
+  import pyaudio
+  import pydub
+
+  # The local imports
+  import constants
+
+except Exception as import_error:
+  print("Audio Player faield to import: ", import_error)
+  sys.exit()
+
 
 class AudioPlayer(threading.Thread):
-    FORMAT = 8
-    CHANNELS = 2
-    RATE = 44100
-    OUTPUT = True
+  # Class wide static variables
+  AUDIO_REQUEST_ASSERT = "Audio Request must be a dict"
+  LOCATION_ASSERT = "Location must be a float"
+  AUDIO_DATA_ASSERT = "Audio Data must be bytes"
 
-    EMPTY_AUDIO_BIT = [0]
-    BYTES_PER_FRAME = 4
-    FRAME_SIZE = 1024
-    BYTE_FRAME_SIZE = BYTES_PER_FRAME * FRAME_SIZE
+  REQUEST_BUFFER_LIMIT = 5
+  AUDIO_BUFFER_LIMIT = 3
 
-    STARTING_LOCATION = 0.0
-    LOCATION_MAX =  1.0
-    LOCATION_MIN = -1.0
+  # __init(self): The class initilizer which takes no variables
+  # Allocates the various audio player parameter and settings
+  def __init__(self):
+    threading.Thread.__init__(self)
 
-    SEGMENT_WIDTH = 2
+    self._audio_player, self._audio_streamer = self._init_audio_player()
+    self._temp_audio_segment = self._create_empty_audio_segment()
 
-    AUDIO_QUEUE_DEPTH = 3
-    AUDIO_READY_DEPTH = 3
+    self._audio_status_queue = queue.Queue()
+    self._audio_request_queue = queue.Queue()
+    self._audio_data_queue = queue.Queue()
 
-    SPEAKER_LOC_STR = "speaker_location"
-    AUDIO_PAYLOAD_STR = "audio_payload"
+    self._blank_audio_data = self._create_empty_audio_data()
+    self._speaker_location = constants.STARTING_LOCATION
 
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self._audio_player = pyaudio.PyAudio()
+    self._audio_player_running = False
+    return
 
-        self._audio_streamer = self._audio_player.open(format=self.FORMAT,
-                                                       channels=self.CHANNELS,
-                                                       rate=self.RATE,
-                                                       output=self.OUTPUT,
-                                                       stream_callback=self._callback)
+  # __del__(self): The deallocater for the class which is called when freed
+  def __del__(self):
+    if self._audio_player_running:
+      self.stop()
+    return
 
-        self._current_audio_segment = pydub.AudioSegment(data=bytes(),
-                                                         sample_width= self.SEGMENT_WIDTH,
-                                                         frame_rate=self.RATE,
-                                                         channels=self.CHANNELS)
+  # run(self): The function that is called when the thread starts
+  # will loop processing audio request messages until it receives a
+  # message on the class status queue
+  def run(self):
+    print("Starting the audio player")
+    self._audio_player_running = True
+    self._audio_streamer.start_stream()
 
-        self._audio_status_queue = queue.Queue()
-        self._audio_request_queue = queue.Queue()
-        self._audio_data_queue = queue.Queue(self.AUDIO_QUEUE_DEPTH)
+    while self._audio_status_queue.empty():
+      while not self._audio_request_queue.empty():
+        audio_data_packet = self._audio_request_queue.get()
+        self._handle_audio_packet(audio_data_packet)
 
-        self._blank_audio_data = bytes(self.EMPTY_AUDIO_BIT * self.BYTE_FRAME_SIZE)
+    self._empty_audio_queues()
+    self._stop_audio_player()
+    print("Finished running the audio player")
+    return
 
-        self._speaker_location = self.STARTING_LOCATION
+  # stop(self): Called to stop the class by putting a kill message on
+  # the internal status queue
+  def stop(self):
+    self._audio_status_queue.put(constants.PROCESS_KILL_WORD)
+    self._audio_player_running = False
+    return
 
-        self._player_blocking = False
-        self._audio_player_running = False
-        return
+  # add_audio_requests(self, audio_request): Adds a dict message onto the 
+  # audio request queue to update various parameters of the audio player
+  # Speaker_Location: <float> between -1 and 1 to set left/right speaker
+  # Audio_Payload: <bytes> the byte array of audio data
+  def add_audio_requests(self, audio_request):
+    assert isinstance(audio_request,dict), AUDIO_REQUEST_ASSERT
+    self._audio_request_queue.put(audio_request)
+    return
 
-    def __del__(self):
-        if self._audio_player_running:
-            self.stop()
-        return
+  # set_speaker_location(self, location): Takes in a float value for location
+  # between -1.0 and 1.0 that sets how left/right the position of the speaker
+  def set_speaker_location(self, location):
+    assert isinstance(location, float), LOCATION_ASSERT
+    
+    if location < constants.LOCATION_MIN:
+      self._speaker_location = constants.LOCATION_MIN
+    elif location > constants.LOCATION_MAX:
+      self._speaker_location = constants.LOCATION_MAX
+    else:
+      self._speaker_location = location
 
-    def run(self):
-        print("Starting the audio player")
-        self._audio_player_running = True
-        self._audio_streamer.start_stream()
+    return
 
-        while self._audio_status_queue.empty():
-            if not self._audio_request_queue.empty():
-                audio_data_packet = self._audio_request_queue.get()
-                self._handle_audio_packet(audio_data_packet)
+  # set_audio_data(self, audio_data): Takes in a byte array that is of size
+  # multiple of 4096 and splices into frames to be put onto the audio playback
+  def set_audio_data(self, audio_data):
+    assert isinstance(audio_data,bytes), AUDIO_DATA_ASSERT
 
-        self._empty_audio_queues()
-        self._stop_audio_player()
-        print("Finished running the audio player")
-        return
+    audio_start_index = 0
+    audio_end_index = constants.AUDIO_BYTE_FRAME_SIZE
+    audio_frame_count = int(len(audio_data)/constants.AUDIO_BYTE_FRAME_SIZE)
 
-    def add_audio_request(self, audio_request):
-        if isinstance(audio_request, dict):
-            self._audio_request_queue.put(audio_request)
-        return
+    for audio_frame in range(audio_frame_count):
+      frame_audio_data = audio_data[audio_start_index:audio_end_index]
 
-    def set_speaker_location(self, location):
-        if isinstance(location, float):
-            if location < self.LOCATION_MIN:
-                self._speaker_location = self.LOCATION_MIN
-            elif location > self.LOCATION_MAX:
-                self._speaker_location = self.LOCATION_MAX
-            else:
-                self._speaker_location = location
-        return
+      self._temp_audio_segment._data = frame_audio_data
+      output_audio_data = self._get_output_audio()
 
-    def set_audio_data(self, audio_data):
-        try:
-            audio_start_index = 0
-            audio_end_index = self.BYTE_FRAME_SIZE
-            audio_frame_count = int(len(audio_data)/self.BYTE_FRAME_SIZE)
+      audio_start_index = audio_end_index
+      audio_end_index += constants.AUDIO_BYTE_FRAME_SIZE
 
-            byte_audio_data = bytes(audio_data)
-            
-            for audio_frame in range(audio_frame_count):
-                frame_audio_data = byte_audio_data[audio_start_index:audio_end_index]
-                
-                self._current_audio_segment._data = frame_audio_data
-                output_audio_data = self._get_output_audio()
-                self._audio_data_queue.put(output_audio_data.raw_data)
+      #TODO: Might want to look into having a queue depth
+      self._audio_data_queue.put(output_audio_data.raw_data)
 
-                audio_start_index = audio_end_index
-                audio_end_index += self.BYTE_FRAME_SIZE
+    return
 
+  # audio_player_ready(self): A non-blocking call that will return if the audio
+  # player is ready for more packets, it should be used to handle getting
+  # smooth playback
+  def audio_player_ready(self):
+    audio_player_status = True
 
-            pass
-        except Exception as set_audio_error:
-            print("Set audio data got the error of: ", set_audio_error)
-        return
+    if self._audio_request_queue.qsize() > self.REQUEST_BUFFER_LIMIT:
+      audio_player_status = False
+    elif self._audio_data_queue.qsize() > self.AUDIO_BUFFER_LIMIT:
+      audio_player_status = False
 
-    def add_data_to_queue(self, audio_data):
-        self._audio_data_queue.put(bytes(audio_data))
-        return
+    return audio_player_status
 
-    def stop(self):
-        self._audio_status_queue.put("KILL")
-        self._audio_player_running = False
-        return
+  # wait_for_audio_player(self): A blocking call that will wait until the audio
+  # player is ready to continue before returning
+  def wait_for_audio_player(self):
+    while not self.audio_player_ready():
+      pass
+    return
 
-    def _callback(self, in_data, frame_count, time_info, status):
-        data = None
+  # Private functions for the audio_player
 
-        if self._audio_data_queue.empty():
-            data = self._blank_audio_data
-        else:
-            data = self._audio_data_queue.get()
+  def _init_audio_player(self):
+    audio_player = pyaudio.PyAudio()
 
-        self._player_blocking = False
-        return (data, pyaudio.paContinue)
+    audio_streamer = audio_player.open(format=constants.AUDIO_FORMAT,
+                                       channels=constants.AUDIO_CHANNELS,
+                                       rate=constants.AUDIO_RATE,
+                                       output=True,
+                                       stream_callback=self._audio_callback)
+    return audio_player, audio_streamer
 
-    def _handle_audio_packet(self, audio_data_packet):
-        try:
-            speaker_location = audio_data_packet.get(self.SPEAKER_LOC_STR)
-            audio_data = audio_data_packet.get(self.AUDIO_PAYLOAD_STR)
-            timestamp_data = audio_data_packet.get("Timestamp")
+  def _create_empty_audio_segment(self):
+    audio_segment = pydub.AudioSegment(data=bytes(),
+                                       sample_width=constants.AUDIO_SEG_WIDTH,
+                                       frame_rate=constants.AUDIO_RATE,
+                                       channels=constants.AUDIO_CHANNELS)
+    return audio_segment
 
-            if speaker_location:
-                self.set_speaker_location(speaker_location)
+  def _create_empty_audio_data(self):
+    empty_audio_array = constants.EMPTY_BYTE * constants.AUDIO_BYTE_FRAME_SIZE
+    return bytes(empty_audio_array)
 
-            if audio_data:
-                self.set_audio_data(audio_data)
+  def _get_output_audio(self):
+    panned_audio = self._temp_audio_segment.pan(self._speaker_location)
+    return panned_audio
 
-            if timestamp_data:
-                #print("Message time of: ", str(datetime.datetime.now()),timestamp_data)
-                pass
+  def _audio_callback(self, in_data, frame_count, time_info, status):
+    audio_data = None
 
-        except Exception as audio_packet_error:
-            print("Got the error with _handle_audio_packet: ", audio_packet_error)
-        return
+    if self._audio_data_queue.empty():
+      audio_data = self._blank_audio_data
+    else:
+      audio_data = self._audio_data_queue.get()
 
-    def _get_output_audio(self):
-        return self._current_audio_segment.pan(self._speaker_location)
+    self._frame_count = frame_count
 
-    def _empty_audio_queues(self):
-        while not self._audio_status_queue.empty():
-            self._audio_status_queue.get()
+    return (audio_data, pyaudio.paContinue)
 
-        while not self._audio_request_queue.empty():
-            self._audio_request_queue.get()
+  def _handle_audio_packet(self, audio_data_packet):
+    try:
+      speaker_location = audio_data_packet.get(constants.SPEAKER_LOC_STR)
+      new_audio_data   = audio_data_packet.get(constants.AUDIO_PAYLOAD_STR)
+      timestamp_data   = audio_data_packet.get(constants.TIMESTAMP_STR)
 
-        while not self._audio_data_queue.empty():
-            self._audio_data_queue.get()
+      if speaker_location:
+        self.set_speaker_location(speaker_location)
 
-        return
+      if new_audio_data:
+        self.set_audio_data(new_audio_data)
 
-    def _stop_audio_player(self):
-        self._audio_streamer.stop_stream()
-        self._audio_streamer.close()
-        self._audio_player.terminate()
-        return
+      if timestamp_data:
+        self._process_timestamp(timestamp_data)
+
+    except Exception as audio_packet_error:
+      print("Got the error with the handle audio packet: ", audio_packet_error)
+
+    return
+
+  def _process_timestamp(self, timestamp_data):
+    assert isinstance(timestamp_data,datetime.datetime)
+    current_time = datetime.datetime.now()
+    delta_time = current_time - timestamp_data
+    #TODO: Figure out what to do with timestamp
+    return
+
+  def _empty_audio_queues(self):
+    while not self._audio_status_queue.empty():
+      self._audio_status_queue.get()
+
+    while not self._audio_request_queue.empty():
+      self._audio_request_queue.get()
+
+    while not self._audio_data_queue.empty():
+      self._audio_data_queue.get()
+
+    return
+
+  def _stop_audio_player(self):
+    self._audio_streamer.stop_stream()
+    self._audio_streamer.close()
+    self._audio_player.terminate()
+    return
+
 
 if __name__ == '__main__':
 
-    ap = AudioPlayer()
-    ap.start()
-    ap.set_speaker_location(0.0)
+  ap = AudioPlayer()
+  ap.start()
 
-    time.sleep(2)
+  #Test 1: Setting the location
+  ap.set_speaker_location(0.0)
 
-    file_location = "audio/test.wav"
-    audio_file = pydub.AudioSegment.from_wav(file_location)
-    audio_data = audio_file.raw_data
-    prev_audio_index = 0
-    current_audio_index = 4 * 1024
+  #Test 2: Loading audio data from a file
+  file_location = "audio/test.wav"
+  audio_file = pydub.AudioSegment.from_wav(file_location)
+  audio_data = audio_file.raw_data
 
-    while current_audio_index < len(audio_data)/10:
-      audio_data_chunk = audio_data[prev_audio_index:current_audio_index]
-      prev_audio_index = current_audio_index
-      current_audio_index += 4 * 1024
-      ap.add_audio_request({ap.AUDIO_PAYLOAD_STR:audio_data_chunk})
+  playback_len = int(len(audio_data)/10)
 
-    print("Finished playback")
 
-    time.sleep(5)
+  prev_audio_index = 0
+  current_audio_index = constants.AUDIO_BYTE_FRAME_SIZE
 
-    ap.stop()
+  while current_audio_index < playback_len:
+    audio_data_chunk = audio_data[prev_audio_index:current_audio_index]
 
-    ap.join()
+    ap.add_audio_requests({constants.AUDIO_PAYLOAD_STR: audio_data_chunk,
+                           constants.TIMESTAMP_STR: datetime.datetime.now()})
 
-    print("DONE")
+    prev_audio_index = current_audio_index
+    current_audio_index += constants.AUDIO_BYTE_FRAME_SIZE
+    
+    ap.wait_for_audio_player()
+
+  print("Finished playback")
+  ap.stop()
+  ap.join()
+
+  print("Closing")
