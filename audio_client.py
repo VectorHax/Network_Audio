@@ -24,9 +24,16 @@ except Exception as import_error:
 
 
 class AudioClient(multiprocessing.Process):
+  # Class wide static variables
+  INVALID_HOST_STRING = "host_ip must be a string"
+
   CLIENT_TIMEOUT = .2
 
+  # __init__(self, host_ip): The class initilizer which takes a host_ip string
+  # of the ip address of the audio server in which it will spin up to connect
+  # and collect audio packets to play through it's audio player
   def __init__(self, host_ip):
+    assert isinstance(host_ip,str), self.INVALID_HOST_STRING
     multiprocessing.Process.__init__(self)
 
     self._client_status_queue = multiprocessing.Queue()
@@ -41,11 +48,15 @@ class AudioClient(multiprocessing.Process):
     self._client_running = False
     return
 
+  # __del__(self): The deallocater for the class which is called when freed
   def __del__(self):
     if self._client_running:
       self.stop()
     return
 
+  # run(self): The function that is called when the thread starts and has
+  # the attempt to connect to the server and when connected it will keep
+  # collecting packets to be put onto the audio player
   def run(self):
     self._client_running = True
 
@@ -61,12 +72,17 @@ class AudioClient(multiprocessing.Process):
     self._audio_player.stop()
     return
 
+  # stop(self): Called to stop the class by putting a kill message on the
+  # internal status queue signalling all process to stop
   def stop(self):
     self._client_status_queue.put(constants.PROCESS_KILL_WORD)
     
     self._client_running = False
     return
 
+  # client_audio_request(self, audio_request): Takes in a dict audio_request
+  # that will then be put onto the audio player
+  # It is meant to be a debug function
   def client_audio_request(self, audio_request):
     self._audio_data_queue.put(audio_request)
     return

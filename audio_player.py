@@ -86,7 +86,7 @@ class AudioPlayer(threading.Thread):
   # Speaker_Location: <float> between -1 and 1 to set left/right speaker
   # Audio_Payload: <bytes> the byte array of audio data
   def add_audio_request(self, audio_request):
-    assert isinstance(audio_request,dict), AUDIO_REQUEST_ASSERT
+    assert isinstance(audio_request,dict), self.AUDIO_REQUEST_ASSERT
     self._audio_request_queue.put(audio_request)
     return
 
