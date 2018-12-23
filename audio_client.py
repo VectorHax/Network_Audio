@@ -47,7 +47,6 @@ class AudioClient(multiprocessing.Process):
     return
 
   def run(self):
-    print("Starting up the audio client")
     self._client_running = True
 
     self._start_audio_player()
@@ -63,8 +62,8 @@ class AudioClient(multiprocessing.Process):
     return
 
   def stop(self):
-    if self._client_running:
-      self._client_status_queue.put(constants.PROCESS_KILL_WORDs)
+    self._client_status_queue.put(constants.PROCESS_KILL_WORD)
+    
     self._client_running = False
     return
 
@@ -98,7 +97,7 @@ class AudioClient(multiprocessing.Process):
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
       time.sleep(.01)
-    print("Left handle packet thread")
+
     return
 
   def _get_packet_from_server(self):
@@ -173,5 +172,5 @@ if __name__ == '__main__':
 
   time.sleep(5)
   print("Stopping")
-  print("Done")
   test_audio_client.stop()
+  print("Done")

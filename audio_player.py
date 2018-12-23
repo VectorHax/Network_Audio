@@ -62,7 +62,6 @@ class AudioPlayer(threading.Thread):
   # will loop processing audio request messages until it receives a
   # message on the class status queue
   def run(self):
-    print("Starting the audio player")
     self._audio_player_running = True
     self._audio_streamer.start_stream()
 
@@ -73,7 +72,6 @@ class AudioPlayer(threading.Thread):
 
     self._empty_audio_queues()
     self._stop_audio_player()
-    print("Finished running the audio player")
     return
 
   # stop(self): Called to stop the class by putting a kill message on
