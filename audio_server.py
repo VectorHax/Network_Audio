@@ -33,7 +33,7 @@ class AudioServer(multiprocessing.Process):
   SERVER_SOCKET_TIMEOUT = .2
   SERVER_SOCKET_BACKLOG = 5
 
-  FRAMES_PER_PACKET = 10
+  FRAMES_PER_PACKET = 8
   SEND_FRAME_SIZE = FRAMES_PER_PACKET * constants.AUDIO_BYTE_FRAME_SIZE
 
   def __init__(self):
@@ -48,6 +48,8 @@ class AudioServer(multiprocessing.Process):
 
     self._audio_data_queue = multiprocessing.Queue()
     self._audio_data_thread = None
+
+    self._packets_sent = 0
     return
 
   def __del__(self):
@@ -84,6 +86,8 @@ class AudioServer(multiprocessing.Process):
       prev_audio_index = 0
       current_audio_index = self.SEND_FRAME_SIZE
 
+      packets_created = 0
+
       while current_audio_index < len(audio_data)/10:
         audio_data_chunk = audio_data[prev_audio_index:current_audio_index]
         
@@ -91,6 +95,9 @@ class AudioServer(multiprocessing.Process):
         current_audio_index += self.SEND_FRAME_SIZE
         #print("Adding audio data onto the queue")
         self._audio_data_queue.put(audio_data_chunk)
+        packets_created += 1
+
+      print("Created: ", packets_created, " packets")
 
     except Exception as load_audio_error:
       print("Failed to load the audio: ", load_audio_error)
@@ -103,12 +110,17 @@ class AudioServer(multiprocessing.Process):
     return
 
   def _data_thread_func(self):
+    packets_sent = 0
+
     while self._server_status_queue.empty():
       if not self._audio_data_queue.empty():
         audio_data = self._audio_data_queue.get()
         self._handle_audio_data(audio_data)
-        self._wait_until_client_ready()
+        #self._wait_until_client_ready()
+        packets_sent += 1
 
+    print("Server processed: ", packets_sent, " audio packets")
+    print("Server sent: ", self._packets_sent, " audio packets")
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
       time.sleep(.01)
@@ -124,14 +136,11 @@ class AudioServer(multiprocessing.Process):
   def _handle_audio_data(self, audio_data):
     try:
       for client_thread in self._client_thread_list:
-        if client_thread.is_ready():
-          #current_time = datetime.datetime.now()
-          packet_message = {constants.AUDIO_PAYLOAD_STR: list(audio_data)}
-          #packet_message.update({constants.TIMESTAMP_STR: current_time})
-          client_thread.add_packet_message(packet_message)
-        else:
-          pass
-          #print("Client wasn't ready")
+        # TODO: Want to have a proper way to check if the client is ready
+        # previous method was to slow and would halt
+        packet_message = {constants.AUDIO_PAYLOAD_STR: list(audio_data)}
+        client_thread.add_packet_message(packet_message)
+        self._packets_sent += 1
     
     except Exception as handle_data_error:
       print("Got the error handling data: ", handle_data_error)
