@@ -33,7 +33,7 @@ class AudioServer(multiprocessing.Process):
   SERVER_SOCKET_TIMEOUT = .2
   SERVER_SOCKET_BACKLOG = 5
 
-  FRAMES_PER_PACKET = 5
+  FRAMES_PER_PACKET = 10
   SEND_FRAME_SIZE = FRAMES_PER_PACKET * constants.AUDIO_BYTE_FRAME_SIZE
 
   def __init__(self):
@@ -51,15 +51,26 @@ class AudioServer(multiprocessing.Process):
     return
 
   def __del__(self):
+
     return
 
   def run(self):
-
+    self._init_data_thread()
     while self._server_status_queue.empty():
       if not self._server_socket:
         self._init_server_socket()
       else:
         self._accept_clients()
+
+    self._audio_data_thread.join()
+
+    while not self._server_status_queue.empty():
+      self._server_status_queue.get()
+
+    while not self._audio_data_queue.empty():
+      self._audio_data_queue.get()
+
+    print("Closed Audio Server loop")
     return
 
   def stop(self):
@@ -78,11 +89,12 @@ class AudioServer(multiprocessing.Process):
         
         prev_audio_index = current_audio_index
         current_audio_index += self.SEND_FRAME_SIZE
+        #print("Adding audio data onto the queue")
         self._audio_data_queue.put(audio_data_chunk)
+
     except Exception as load_audio_error:
       print("Failed to load the audio: ", load_audio_error)
     return
-
 
   def _init_data_thread(self):
     self._audio_data_thread = threading.Thread(target=self._data_thread_func,
@@ -95,25 +107,43 @@ class AudioServer(multiprocessing.Process):
       if not self._audio_data_queue.empty():
         audio_data = self._audio_data_queue.get()
         self._handle_audio_data(audio_data)
-      time.sleep(.017)
+        self._wait_until_client_ready()
 
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
       time.sleep(.01)
 
+    for client_thread in self._client_thread_list:
+      client_thread.stop()
+      client_thread.join()
+      print("Closed a client thread")
+
+    print("Left the data thread func")
     return
 
   def _handle_audio_data(self, audio_data):
     try:
       for client_thread in self._client_thread_list:
         if client_thread.is_ready():
-          client_thread.add_packet_message(audio_data)
+          #current_time = datetime.datetime.now()
+          packet_message = {constants.AUDIO_PAYLOAD_STR: list(audio_data)}
+          #packet_message.update({constants.TIMESTAMP_STR: current_time})
+          client_thread.add_packet_message(packet_message)
+        else:
+          pass
+          #print("Client wasn't ready")
     
     except Exception as handle_data_error:
       print("Got the error handling data: ", handle_data_error)
     return
 
-
+  def _wait_until_client_ready(self):
+    for client_thread in self._client_thread_list:
+      if client_thread.is_alive():
+        while (not client_thread.is_ready()) and client_thread.is_alive():
+          pass
+      else:
+        self._client_thread_list.remove(client_thread)
 
   def _init_server_socket(self):
     try:
@@ -141,6 +171,7 @@ class AudioServer(multiprocessing.Process):
       # TODO: Want to design the client map for more features
       client_socket, client_address = self._server_socket.accept()
       client_thread = ClientThread(client_socket)
+      client_thread.start()
       self._client_thread_list.append(client_thread)
 
     except socket.timeout:
@@ -151,6 +182,7 @@ class AudioServer(multiprocessing.Process):
     return
 
 class ClientThread(threading.Thread):
+  INVALID_PACKET_TYPE = "The packet type must be a dict"
 
   def __init__(self, client_socket):
     threading.Thread.__init__(self)
@@ -167,12 +199,23 @@ class ClientThread(threading.Thread):
     return
 
   def run(self):
+    print("Client Thread starting")
     while self._status_queue.empty():
       if not self._packet_queue.empty():
         packet_message = self._packet_queue.get()
         self._handle_packet_message(packet_message)
 
+
+    self._client_ready = False
     self._close_client_socket()
+
+    while not self._status_queue.empty():
+      self._status_queue.get()
+
+    while not self._packet_queue.empty():
+      self._packet_queue.get()
+
+    print("Closed Client Thread")
     return
 
   def stop(self):
@@ -184,16 +227,19 @@ class ClientThread(threading.Thread):
     return client_thread_status
 
   def add_packet_message(self, packet_message):
-    assert isinstance(packet_message, dict)
+    assert isinstance(packet_message, dict), self.INVALID_PACKET_TYPE
     self._packet_queue.put(packet_message)
     return
 
   def _handle_packet_message(self, packet_message):
     self._client_ready = False
-    print("Client Thread sending a message")
-    self._send_packet_message()
+    self._send_packet_message(packet_message)
+    #start_time = datetime.datetime.now()
     self._get_ready_response()
-    
+    #end_time = datetime.datetime.now()
+    #delta_time = (end_time - start_time).total_seconds()
+    #print("Took: ", delta_time, " seconds for ready")
+
     self._client_ready = True
 
     return
@@ -213,9 +259,11 @@ class ClientThread(threading.Thread):
         ready_message = util_func.receive_json_socket(self._client_socket)
 
         if not ready_message:
+          print("Never got a ready message")
           self._stop_thread()
 
       except Exception as ready_message_error:
+        print("Got the ready message error: ", ready_message_error)
         self._stop_thread()
 
     return
@@ -246,13 +294,17 @@ if __name__ == '__main__':
   test_audio_client = audio_client.AudioClient(util_func.get_own_ip())
   test_audio_client.start()
 
-  time.sleep(2)
+  time.sleep(5)
   print("Sending out audio data")
-  test_audio_server.load_audio_data("audio/sample.wav")
+  test_audio_server.load_audio_data("audio/test.wav")
 
 
-  time.sleep(3)
+  time.sleep(5)
 
   print("Closing")
   test_audio_client.stop()
+  test_audio_client.join()
+  print("Client Closed")
   test_audio_server.stop()
+  test_audio_server.join()
+  print("ALL DONE")

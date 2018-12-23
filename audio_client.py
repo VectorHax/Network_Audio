@@ -43,9 +43,10 @@ class AudioClient(multiprocessing.Process):
     self._client_socket = None
     self._host_ip = host_ip
 
-    self._audio_thread = None
+    self._packet_thread = None
 
     self._client_running = False
+    self._client_connected = False
     return
 
   # __del__(self): The deallocater for the class which is called when freed
@@ -61,7 +62,7 @@ class AudioClient(multiprocessing.Process):
     self._client_running = True
 
     self._start_audio_player()
-    self._create_audio_thread()
+    self._create_packet_thread()
 
     while self._client_status_queue.empty():
       if self._client_socket:
@@ -69,7 +70,7 @@ class AudioClient(multiprocessing.Process):
       else:
         self._connect_to_server()
 
-    self._audio_player.stop()
+    self._clean_shutdown()
     return
 
   # stop(self): Called to stop the class by putting a kill message on the
@@ -88,16 +89,15 @@ class AudioClient(multiprocessing.Process):
     return
 
   # The class private functions
-
   def _start_audio_player(self):
     self._audio_player = audio_player.AudioPlayer()
     self._audio_player.start()
     return
 
-  def _create_audio_thread(self):
-    self._audio_thread = threading.Thread(target=self._handle_packet_thread,
+  def _create_packet_thread(self):
+    self._packet_thread = threading.Thread(target=self._handle_packet_thread,
                                            args=())
-    self._audio_thread.start()
+    self._packet_thread.start()
     return
 
   def _handle_packet_thread(self):
@@ -105,12 +105,16 @@ class AudioClient(multiprocessing.Process):
     while self._client_status_queue.empty():
 
       if not self._audio_data_queue.empty():
-        print("Client got an audio message")
         audio_request = self._audio_data_queue.get()
+
+        new_audio_data = bytes(audio_request[constants.AUDIO_PAYLOAD_STR])
+        audio_request.update({constants.AUDIO_PAYLOAD_STR:new_audio_data})
+
         self._audio_player.add_audio_request(audio_request)
         self._audio_player.wait_for_audio_player()
-        self._send_ready_message()
-        print("Client sent ready message")
+
+        if self._client_connected:
+          self._send_ready_message()
 
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
@@ -124,21 +128,24 @@ class AudioClient(multiprocessing.Process):
       if client_json_message:
         self._audio_data_queue.put(client_json_message)
       else:
+        print("Closing the socket because of empty message")
         self._close_client_socket()
 
     except socket.timeout:
       pass
 
     except Exception as get_packet_error:
-      print("Got the unhandled error of: ", get_packet_error)
+      print("Got the Get packer error of: ", get_packet_error)
       self._close_client_socket()
     return
 
   def _close_client_socket(self):
+    #print("Audio Client closing the socket")
     if self._client_socket:
       self._client_socket.close()
 
     self._client_socket = None
+    self._client_connected = False
     return
 
   def _connect_to_server(self):
@@ -146,8 +153,10 @@ class AudioClient(multiprocessing.Process):
       self._client_socket = socket.socket()
       self._client_socket.settimeout(self.CLIENT_TIMEOUT)
       self._client_socket.connect((self._host_ip,constants.AUDIO_CLIENT_PORT))
+      self._client_connected = True
       print("Client Connected")
     except Exception as server_connect_error:
+      #print("Had an issue connecting to the server because: ", server_connect_error)
       self._close_client_socket()
     return
 
@@ -155,9 +164,23 @@ class AudioClient(multiprocessing.Process):
     if self._client_socket:
       try:
         ready_message = {constants.CLIENT_READY_STR: True}
-        util_func.send_json_message(self._client_socket, ready_message)
+        util_func.send_json_socket(self._client_socket, ready_message)
       except Exception as ready_send_error:
+        print("Had an issue sending a ready message because: ", ready_send_error)
         self._close_client_socket()
+
+    return
+
+  def _clean_shutdown(self):
+    self._audio_player.stop()
+    self._packet_thread.join()
+
+    while not self._client_status_queue.empty():
+      self._client_status_queue.get()
+
+
+    while not self._audio_data_queue.empty():
+      self._audio_data_queue.get()
 
     return
 

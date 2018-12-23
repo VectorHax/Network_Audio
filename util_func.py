@@ -31,15 +31,15 @@ def receive_json_socket(sock):
         length_str += read_char.decode()
         read_char = sock.recv(1)
 
-        length_int = int(length_str)
-        pending_bytes = length_int
+      length_int = int(length_str)
+      pending_bytes = length_int
 
-        while pending_bytes:
-          temp_buffer = sock.recv(pending_bytes)
-          message_buffer += temp_buffer.decode()
-          pending_bytes -= len(temp_buffer)
+      while pending_bytes:
+        temp_buffer = sock.recv(pending_bytes)
+        message_buffer += temp_buffer.decode()
+        pending_bytes -= len(temp_buffer)
 
-        received_json = json.loads(message_buffer)
+      received_json = json.loads(message_buffer)
 
     return received_json
 

@@ -31,8 +31,8 @@ class AudioPlayer(threading.Thread):
   LOCATION_ASSERT = "Location must be a float"
   AUDIO_DATA_ASSERT = "Audio Data must be bytes"
 
-  REQUEST_BUFFER_LIMIT = 5
-  AUDIO_BUFFER_LIMIT = 3
+  REQUEST_BUFFER_LIMIT = 10
+  AUDIO_BUFFER_LIMIT = 30
 
   # __init(self): The class initilizer which takes no variables
   # Allocates the various audio player parameter and settings
