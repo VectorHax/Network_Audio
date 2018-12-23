@@ -93,7 +93,7 @@ class AudioPlayer(threading.Thread):
   # set_speaker_location(self, location): Takes in a float value for location
   # between -1.0 and 1.0 that sets how left/right the position of the speaker
   def set_speaker_location(self, location):
-    assert isinstance(location, float), LOCATION_ASSERT
+    assert isinstance(location, float), self.LOCATION_ASSERT
     
     if location < constants.LOCATION_MIN:
       self._speaker_location = constants.LOCATION_MIN
@@ -107,7 +107,7 @@ class AudioPlayer(threading.Thread):
   # set_audio_data(self, audio_data): Takes in a byte array that is of size
   # multiple of 4096 and splices into frames to be put onto the audio playback
   def set_audio_data(self, audio_data):
-    assert isinstance(audio_data,bytes), AUDIO_DATA_ASSERT
+    assert isinstance(audio_data,bytes), self.AUDIO_DATA_ASSERT
 
     audio_start_index = 0
     audio_end_index = constants.AUDIO_BYTE_FRAME_SIZE
