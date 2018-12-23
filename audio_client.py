@@ -1,5 +1,5 @@
 # audio_client.py
-# Created by: Dale Best
+# Created by: VectorHax
 # Created on: December 22nd, 2018
 
 import sys
@@ -105,10 +105,12 @@ class AudioClient(multiprocessing.Process):
     while self._client_status_queue.empty():
 
       if not self._audio_data_queue.empty():
+        print("Client got an audio message")
         audio_request = self._audio_data_queue.get()
         self._audio_player.add_audio_request(audio_request)
         self._audio_player.wait_for_audio_player()
         self._send_ready_message()
+        print("Client sent ready message")
 
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()

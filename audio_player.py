@@ -1,5 +1,5 @@
 # audio_player.py
-# Created by: Dale Best
+# Created by: VectorHax
 # Created on: December 22nd, 2018
 
 import sys
