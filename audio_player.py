@@ -83,11 +83,11 @@ class AudioPlayer(threading.Thread):
     self._audio_player_running = False
     return
 
-  # add_audio_requests(self, audio_request): Adds a dict message onto the 
+  # add_audio_request(self, audio_request): Adds a dict message onto the 
   # audio request queue to update various parameters of the audio player
   # Speaker_Location: <float> between -1 and 1 to set left/right speaker
   # Audio_Payload: <bytes> the byte array of audio data
-  def add_audio_requests(self, audio_request):
+  def add_audio_request(self, audio_request):
     assert isinstance(audio_request,dict), AUDIO_REQUEST_ASSERT
     self._audio_request_queue.put(audio_request)
     return
@@ -256,7 +256,7 @@ if __name__ == '__main__':
   while current_audio_index < playback_len:
     audio_data_chunk = audio_data[prev_audio_index:current_audio_index]
 
-    ap.add_audio_requests({constants.AUDIO_PAYLOAD_STR: audio_data_chunk,
+    ap.add_audio_request({constants.AUDIO_PAYLOAD_STR: audio_data_chunk,
                            constants.TIMESTAMP_STR: datetime.datetime.now()})
 
     prev_audio_index = current_audio_index
