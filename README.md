@@ -1,2 +1,2 @@
 # Network_Audio
-A python implementation of a network audio solution 
+A python3 implementation of a network audio solution 

@@ -33,7 +33,7 @@ class AudioServer(multiprocessing.Process):
   SERVER_SOCKET_TIMEOUT = .2
   SERVER_SOCKET_BACKLOG = 5
 
-  FRAMES_PER_PACKET = 8
+  FRAMES_PER_PACKET = 7
   SEND_FRAME_SIZE = FRAMES_PER_PACKET * constants.AUDIO_BYTE_FRAME_SIZE
 
   def __init__(self):
