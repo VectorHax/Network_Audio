@@ -48,8 +48,6 @@ class AudioServer(multiprocessing.Process):
 
     self._audio_data_queue = multiprocessing.Queue()
     self._audio_data_thread = None
-
-    self._packets_sent = 0
     return
 
   def __del__(self):
@@ -72,7 +70,6 @@ class AudioServer(multiprocessing.Process):
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
 
-    print("Closed Audio Server loop")
     return
 
   def stop(self):
@@ -86,18 +83,12 @@ class AudioServer(multiprocessing.Process):
       prev_audio_index = 0
       current_audio_index = self.SEND_FRAME_SIZE
 
-      packets_created = 0
-
       while current_audio_index < len(audio_data)/10:
         audio_data_chunk = audio_data[prev_audio_index:current_audio_index]
         
         prev_audio_index = current_audio_index
         current_audio_index += self.SEND_FRAME_SIZE
-        #print("Adding audio data onto the queue")
         self._audio_data_queue.put(audio_data_chunk)
-        packets_created += 1
-
-      print("Created: ", packets_created, " packets")
 
     except Exception as load_audio_error:
       print("Failed to load the audio: ", load_audio_error)
@@ -110,17 +101,13 @@ class AudioServer(multiprocessing.Process):
     return
 
   def _data_thread_func(self):
-    packets_sent = 0
 
     while self._server_status_queue.empty():
       if not self._audio_data_queue.empty():
         audio_data = self._audio_data_queue.get()
         self._handle_audio_data(audio_data)
-        #self._wait_until_client_ready()
-        packets_sent += 1
-
-    print("Server processed: ", packets_sent, " audio packets")
-    print("Server sent: ", self._packets_sent, " audio packets")
+        self._wait_until_client_ready()
+    
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
       time.sleep(.01)
@@ -140,7 +127,6 @@ class AudioServer(multiprocessing.Process):
         # previous method was to slow and would halt
         packet_message = {constants.AUDIO_PAYLOAD_STR: list(audio_data)}
         client_thread.add_packet_message(packet_message)
-        self._packets_sent += 1
     
     except Exception as handle_data_error:
       print("Got the error handling data: ", handle_data_error)
@@ -208,7 +194,6 @@ class ClientThread(threading.Thread):
     return
 
   def run(self):
-    print("Client Thread starting")
     while self._status_queue.empty():
       if not self._packet_queue.empty():
         packet_message = self._packet_queue.get()
@@ -224,7 +209,6 @@ class ClientThread(threading.Thread):
     while not self._packet_queue.empty():
       self._packet_queue.get()
 
-    print("Closed Client Thread")
     return
 
   def stop(self):
@@ -243,12 +227,7 @@ class ClientThread(threading.Thread):
   def _handle_packet_message(self, packet_message):
     self._client_ready = False
     self._send_packet_message(packet_message)
-    #start_time = datetime.datetime.now()
     self._get_ready_response()
-    #end_time = datetime.datetime.now()
-    #delta_time = (end_time - start_time).total_seconds()
-    #print("Took: ", delta_time, " seconds for ready")
-
     self._client_ready = True
 
     return
@@ -258,7 +237,6 @@ class ClientThread(threading.Thread):
       try:
         util_func.send_json_socket(self._client_socket, packet_message)
       except Exception as send_packet_error:
-        print("Had an error sending the packet: ", send_packet_error)
         self._stop_thread()
     return
 
@@ -268,11 +246,9 @@ class ClientThread(threading.Thread):
         ready_message = util_func.receive_json_socket(self._client_socket)
 
         if not ready_message:
-          print("Never got a ready message")
           self._stop_thread()
 
       except Exception as ready_message_error:
-        print("Got the ready message error: ", ready_message_error)
         self._stop_thread()
 
     return
@@ -299,21 +275,32 @@ if __name__ == '__main__':
 
   time.sleep(1)
 
-  print("Creating a client")
-  test_audio_client = audio_client.AudioClient(util_func.get_own_ip())
-  test_audio_client.start()
+  print("Creating the left client")
+  left_audio_client = audio_client.AudioClient(util_func.get_own_ip())
+  left_audio_client.start()
+  left_audio_client.client_audio_request({constants.SPEAKER_LOC_STR: constants.FULL_LEFT_LOCATION})
 
-  time.sleep(5)
+  print("Creating the right client")
+  right_audio_client = audio_client.AudioClient(util_func.get_own_ip())
+  right_audio_client.start()
+  right_audio_client.client_audio_request({constants.SPEAKER_LOC_STR: constants.FULL_RIGHT_LOCATION})
+
+  time.sleep(2)
   print("Sending out audio data")
   test_audio_server.load_audio_data("audio/test.wav")
 
 
   time.sleep(5)
 
-  print("Closing")
-  test_audio_client.stop()
-  test_audio_client.join()
-  print("Client Closed")
+  print("Closing the left client")
+  left_audio_client.stop()
+  left_audio_client.join()
+
+  print("Closing the right client")
+  right_audio_client.stop()
+  right_audio_client.join()
+
+  print("Closing the server")
   test_audio_server.stop()
   test_audio_server.join()
   print("ALL DONE")

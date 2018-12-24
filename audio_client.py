@@ -47,8 +47,6 @@ class AudioClient(multiprocessing.Process):
 
     self._client_running = False
     self._client_connected = False
-
-    self._packets_recv = 0
     return
 
   # __del__(self): The deallocater for the class which is called when freed
@@ -72,7 +70,6 @@ class AudioClient(multiprocessing.Process):
       else:
         self._connect_to_server()
 
-    print("Client got: ", self._packets_recv, " packets")
     self._clean_shutdown()
     return
 
@@ -105,24 +102,22 @@ class AudioClient(multiprocessing.Process):
 
   def _handle_packet_thread(self):
     audio_request = {}
-    packets_recved = 0
     while self._client_status_queue.empty():
 
       if not self._audio_data_queue.empty():
         audio_request = self._audio_data_queue.get()
 
-        new_audio_data = bytes(audio_request[constants.AUDIO_PAYLOAD_STR])
-        audio_request.update({constants.AUDIO_PAYLOAD_STR:new_audio_data})
+        if audio_request.get(constants.AUDIO_PAYLOAD_STR):
+          new_audio_data = bytes(audio_request[constants.AUDIO_PAYLOAD_STR])
+          audio_request.update({constants.AUDIO_PAYLOAD_STR:new_audio_data})
 
         self._audio_player.wait_for_audio_player()
         self._audio_player.add_audio_request(audio_request)
-        packets_recved += 1
 
 
         if self._client_connected:
           self._send_ready_message()
 
-    print("Client processed: ", packets_recved, " packets")
     while not self._audio_data_queue.empty():
       self._audio_data_queue.get()
       time.sleep(.01)
@@ -133,7 +128,6 @@ class AudioClient(multiprocessing.Process):
     try:
       client_json_message = util_func.receive_json_socket(self._client_socket)
       if client_json_message:
-        self._packets_recv += 1
         self._audio_data_queue.put(client_json_message)
       else:
         print("Closing the socket because of empty message")
@@ -162,7 +156,6 @@ class AudioClient(multiprocessing.Process):
       self._client_socket.settimeout(self.CLIENT_TIMEOUT)
       self._client_socket.connect((self._host_ip,constants.AUDIO_CLIENT_PORT))
       self._client_connected = True
-      print("Client Connected")
     except Exception as server_connect_error:
       #print("Had an issue connecting to the server because: ", server_connect_error)
       self._close_client_socket()
