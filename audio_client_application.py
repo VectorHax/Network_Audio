@@ -126,3 +126,24 @@ class AudioClientApplication(multiprocessing.Process):
             self._audio_player.add_audio_request(incoming_message)
 
         return
+
+
+if __name__ == '__main__':
+
+    try:
+        ip = sys.argv[1]
+        print("Connecting to server at: ", ip)
+    except Exception as invalid_ip:
+        print("Using default IP")
+        ip = "localhost"
+
+    test_client = AudioClientApplication(ip)
+    test_client.start()
+
+    try:
+        while True:
+            pass
+    except Exception as app_break:
+        pass
+
+    test_client.stop()
