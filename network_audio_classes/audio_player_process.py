@@ -131,7 +131,7 @@ class AudioPlayer(multiprocessing.Process):
     def _audio_callback(self, in_data, frame_count, time_info, status):
 
         try:
-            audio_data = self._audio_data_queue.get(True, 1.0)
+            audio_data = self._audio_data_queue.get_nowait()
 
         except queue.Empty:
             audio_data = self._blank_audio_data
@@ -151,7 +151,7 @@ class AudioPlayer(multiprocessing.Process):
 
     @staticmethod
     def _create_empty_audio_data():
-        empty_audio_array = [0] * constants.AUDIO_BYTE_FRAME_SIZE
+        empty_audio_array = [1] * constants.AUDIO_BYTE_FRAME_SIZE
         return bytes(empty_audio_array)
 
     def _handle_audio_packet(self, audio_data_packet):

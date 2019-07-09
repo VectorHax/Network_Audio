@@ -3,10 +3,7 @@
 # Created on: July 3rd, 2019
 
 import os
-import time
 import datetime
-import threading
-import multiprocessing
 import tkinter
 from tkinter import ttk
 from tkinter import Tk, Label, Button, Entry, Listbox
@@ -14,9 +11,6 @@ from tkinter import Tk, Label, Button, Entry, Listbox
 import pydub
 
 from network_audio_classes import constants
-from network_audio_classes import util_func
-
-from network_audio_classes.audio_player_process import AudioPlayer
 from network_audio_classes.server_network_process import ServerNetworkProcess
 
 
@@ -37,9 +31,6 @@ class AudioGUIServerApplication:
         self._window.protocol("WM_DELETE_WINDOW", self._close_application)
         self._window.resizable(1, 1)
 
-        self._audio_player = AudioPlayer()
-        self._audio_player.start()
-
         self._audio_server = ServerNetworkProcess()
         self._audio_server.start()
 
@@ -59,10 +50,9 @@ class AudioGUIServerApplication:
         return
 
     def __del__(self):
-        self._audio_player.close()
+        return
 
     def _close_application(self):
-        self._audio_player.stop()
         self._audio_server.stop()
         self._window.quit()
         return
@@ -146,13 +136,12 @@ class AudioGUIServerApplication:
         return
 
     def _update_audio_playback(self):
+        audio_time = datetime.datetime.now()
         audio_segment = self._audio_data[self._prev_audio_index:
                                          self._current_audio_index]
-        audio_message = {constants.AUDIO_PAYLOAD_STR: audio_segment}
+        audio_message = {constants.AUDIO_PAYLOAD_STR: list(audio_segment),
+                         constants.TIMESTAMP_STR: str(audio_time)}
 
-        #self._audio_player.add_audio_request(audio_message)
-
-        audio_message.update({constants.AUDIO_PAYLOAD_STR: list(audio_segment)})
         self._audio_server.add_audio_packet(audio_message, nowait=True)
 
         self._prev_audio_index = self._current_audio_index

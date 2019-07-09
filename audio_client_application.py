@@ -12,6 +12,7 @@ try:
     import json
     import queue
     import socket
+    import datetime
     import threading
     import multiprocessing
 
@@ -118,13 +119,20 @@ class AudioClientApplication(multiprocessing.Process):
 
     def _handle_incoming_message(self, incoming_message):
         assert isinstance(incoming_message, dict)
+        message_time = datetime.datetime.now()
         audio_payload = incoming_message.get(constants.AUDIO_PAYLOAD_STR)
+        audio_timestamp_str = incoming_message.get(constants.TIMESTAMP_STR)
 
         if audio_payload is not None:
             byte_payload = bytes(audio_payload)
             incoming_message.update({constants.AUDIO_PAYLOAD_STR: byte_payload})
             self._audio_player.add_audio_request(incoming_message)
 
+        if audio_timestamp_str is not None:
+            audio_timestamp = datetime.datetime.strptime(audio_timestamp_str,
+                                                         "%Y-%m-%d %H:%M:%S.%f")
+            audio_time_delta = (message_time - audio_timestamp).total_seconds()
+            print("Audio time delta of: ", audio_time_delta * 1000, " ms")
         return
 
 
