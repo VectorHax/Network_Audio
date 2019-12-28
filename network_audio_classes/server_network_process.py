@@ -9,6 +9,7 @@
 # The global libraries built into python
 import time
 import queue
+import ctypes
 import socket
 import threading
 import multiprocessing
@@ -29,27 +30,31 @@ class ServerNetworkProcess(multiprocessing.Process):
     def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
 
-        self._client_thread_list = []
-
-        self._send_message_thread = None
+        self._client_thread_list: list = []
 
         self._incoming_message_queue = multiprocessing.Queue(self.QUEUE_DEPTH)
         self._outgoing_message_queue = multiprocessing.Queue(self.QUEUE_DEPTH)
 
-        self._server_ip = ""
+        self._server_ip: str = ""
+
+        self._server_socket: socket.socket
         self._server_socket = None
 
-        self._server_running = multiprocessing.Value("b", True)
-        self._clients_connected = multiprocessing.Value("i", 0)
+        self._server_running = multiprocessing.Value(ctypes.c_bool, True)
+        self._clients_connected = multiprocessing.Value(ctypes.c_uint64, 0)
         return
 
     def run(self):
-        self._create_message_thread()
+
+        send_message_thread = threading.Thread(target=self._send_thread())
+        send_message_thread.start()
 
         while self._server_running.value:
             self._check_for_new_clients()
 
             self._close_dead_client_threads()
+
+        send_message_thread.join()
 
         self._close_dead_client_threads(force_close=True)
         self._clear_queues()
@@ -60,28 +65,26 @@ class ServerNetworkProcess(multiprocessing.Process):
         self.join()
         return
 
-    def add_audio_packet(self, audio_packet, nowait=False):
+    def add_audio_packet(self, audio_packet: dict, wait: bool = True) -> None:
+        assert isinstance(wait, bool)
         assert isinstance(audio_packet, dict)
-        if nowait:
+
+        if wait:
+            self._outgoing_message_queue.put(audio_packet, True, 1.0)
+
+        else:
             if self._outgoing_message_queue.full():
                 self._outgoing_message_queue.get_nowait()
 
             self._outgoing_message_queue.put_nowait(audio_packet)
-        else:
-            self._outgoing_message_queue.put(audio_packet, True, 1.0)
+
         return
 
     @property
-    def clients_connected(self):
+    def clients_connected(self) -> bool:
         return self._clients_connected.value
 
-    def _create_message_thread(self):
-        self._send_message_thread = threading.Thread(target=self._send_thread,
-                                                     args=())
-        self._send_message_thread.start()
-        return
-
-    def _send_thread(self):
+    def _send_thread(self) -> None:
 
         while self._server_running.value:
             try:
@@ -89,8 +92,8 @@ class ServerNetworkProcess(multiprocessing.Process):
 
                 for client_thread in self._client_thread_list:
                     try:
-                        client_thread.add_outgoing_message(outgoing_message,
-                                                           nowait=True)
+                        client_thread.add_outgoing_message(outgoing_message)
+
                     except queue.Full:
                         pass
 
@@ -102,14 +105,14 @@ class ServerNetworkProcess(multiprocessing.Process):
 
         return
 
-    def _check_for_new_clients(self):
+    def _check_for_new_clients(self) -> None:
         if self._server_socket is None:
             self._create_server_socket()
         else:
             self._accept_client()
         return
 
-    def _create_server_socket(self):
+    def _create_server_socket(self) -> None:
         try:
             self._server_ip = util_func.get_own_ip()
             server_ip_info = (self._server_ip, constants.AUDIO_CLIENT_PORT)
@@ -123,7 +126,7 @@ class ServerNetworkProcess(multiprocessing.Process):
             print("Got an error creating server socket: ", create_err)
         return
 
-    def _accept_client(self):
+    def _accept_client(self) -> None:
         try:
             new_client, client_address = self._server_socket.accept()
             client_thread = ClientSocketThread(new_client)
@@ -138,7 +141,7 @@ class ServerNetworkProcess(multiprocessing.Process):
             print("Had an issue with accepting client: ", accept_err)
         return
 
-    def _close_dead_client_threads(self, force_close=False):
+    def _close_dead_client_threads(self, force_close: bool = False) -> None:
         dead_client_list = []
 
         for client_thread in self._client_thread_list:
@@ -152,7 +155,7 @@ class ServerNetworkProcess(multiprocessing.Process):
 
         return
 
-    def _clear_queues(self):
+    def _clear_queues(self) -> None:
         self._outgoing_message_queue = multiprocessing.Queue(self.QUEUE_DEPTH)
         self._incoming_message_queue = multiprocessing.Queue(self.QUEUE_DEPTH)
         return

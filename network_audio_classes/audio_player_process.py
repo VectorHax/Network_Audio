@@ -49,7 +49,7 @@ class AudioPlayer(multiprocessing.Process):
         self._audio_data_queue = multiprocessing.Queue(self.AUDIO_QUEUE_SIZE)
         self._audio_request_queue = multiprocessing.Queue(self.REQ_QUEUE_SIZE)
 
-        self._blank_audio_data = self._create_empty_audio_data()
+        self._blank_audio_data: bytes = self._create_empty_audio_data()
         self._speaker_location = multiprocessing.Value(ctypes.c_float, 0.0)
 
         self._audio_player_running = multiprocessing.Value(ctypes.c_bool, True)

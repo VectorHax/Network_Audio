@@ -142,7 +142,7 @@ class AudioGUIServerApplication:
         audio_message = {constants.AUDIO_PAYLOAD_STR: list(audio_segment),
                          constants.TIMESTAMP_STR: str(audio_time)}
 
-        self._audio_server.add_audio_packet(audio_message, nowait=True)
+        self._audio_server.add_audio_packet(audio_message, wait=False)
 
         self._prev_audio_index = self._current_audio_index
         self._current_audio_index += constants.AUDIO_BYTE_FRAME_SIZE

@@ -23,4 +23,3 @@ def get_own_ip():
     finally:
         temp_socket.close()
     return device_ip
-
