@@ -5,47 +5,50 @@
 # The audio client application
 
 # **********************************Import*********************************** #
-import sys
+# The global libraries built into python
+import time
+import json
+import queue
+import ctypes
+import socket
+import datetime
+import threading
+import multiprocessing
 
-try:
-    # The global libraries built into python
-    import json
-    import queue
-    import socket
-    import datetime
-    import threading
-    import multiprocessing
-
-    # The local libraries
-    from network_audio_classes import constants
-    from network_audio_classes.audio_player_process import AudioPlayer
-    from network_audio_classes.client_socket_thread import ClientSocketThread
-
-except Exception as import_failure:
-    print("Audio Client Application failed to import: ", str(import_failure))
-    sys.exit()
-
+# The local libraries
+from network_audio_classes import constants
+from network_audio_classes.audio_player_process import AudioPlayer
+from network_audio_classes.client_socket_thread import ClientSocketThread
 
 # *************************Audio Client Application************************** #
 
 class AudioClientApplication(multiprocessing.Process):
-    PROCESS_NAME = "Audio Client Application"
+    PROCESS_NAME: str = "Audio Client Application"
 
     # TODO: Want to have a way for the client to auto find the server
-    def __init__(self, host_ip):
+    def __init__(self, host_ip: str):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
 
+        self._audio_player: AudioPlayer
         self._audio_player = None
-        self._client_socket = None
-        self._host_ip = host_ip
 
+        self._client_socket: socket.socket
+        self._client_socket = None
+        
+
+        self._host_ip: str = host_ip
+
+        self._socket_thread: threading.Thread
         self._socket_thread = None
 
-        self._client_connected = multiprocessing.Value("b", False)
+        self._client_connected = multiprocessing.Value(ctypes.c_bool, False)
 
-        self._client_running = multiprocessing.Value("b", True)
+        self._client_running = multiprocessing.Value(ctypes.c_bool, True)
 
-        self._client_location = multiprocessing.Value("f", 0.0)
+        self._client_location = multiprocessing.Value(ctypes.c_float, 0.0)
+
+        self._latency_list: list = []
+        self._average_latency = multiprocessing.Value(ctypes.c_float, 0.0)
 
         return
 
@@ -57,17 +60,12 @@ class AudioClientApplication(multiprocessing.Process):
 
         while self._client_running.value:
             try:
-                if self._client_socket is None:
-                    self._start_socket_thread()
-
-                elif self._socket_thread.client_connected:
-                    incoming_msg = self._socket_thread.get_incoming_message()
-                    self._handle_incoming_message(incoming_msg)
-
-                else:
-                    self._close_client_socket()
+                if self._socket_thread.pending_incoming_message():
+                    incoming_message = self._socket_thread.get_incoming_message()
+                    self._handle_incoming_message(incoming_message)
 
                 self._audio_player.set_speaker_location(self._client_location.value)
+                time.sleep(.001)
 
             except queue.Empty:
                 pass
@@ -84,11 +82,19 @@ class AudioClientApplication(multiprocessing.Process):
         self.join()
         return
 
-    def set_location(self, location):
+    @property
+    def average_latency(self) -> float:
+        return self._average_latency.value
+
+    @property
+    def client_connected(self) -> bool:
+        return self._client_connected.value
+
+    def set_location(self, location: float) -> None:
         self._client_location.value = location
         return
 
-    def _start_socket_thread(self):
+    def _start_socket_thread(self) -> None:
         try:
             client_info = (self._host_ip, constants.AUDIO_CLIENT_PORT)
 
@@ -105,7 +111,7 @@ class AudioClientApplication(multiprocessing.Process):
 
         return
 
-    def _close_client_socket(self):
+    def _close_client_socket(self) -> None:
         if self._client_socket is not None:
             self._client_socket.close()
 
@@ -117,7 +123,7 @@ class AudioClientApplication(multiprocessing.Process):
         self._client_connected.value = False
         return
 
-    def _handle_incoming_message(self, incoming_message):
+    def _handle_incoming_message(self, incoming_message: dict) -> None:
         assert isinstance(incoming_message, dict)
         message_time = datetime.datetime.now()
         audio_payload = incoming_message.get(constants.AUDIO_PAYLOAD_STR)
@@ -132,7 +138,13 @@ class AudioClientApplication(multiprocessing.Process):
             audio_timestamp = datetime.datetime.strptime(audio_timestamp_str,
                                                          "%Y-%m-%d %H:%M:%S.%f")
             audio_time_delta = (message_time - audio_timestamp).total_seconds()
-            print("Audio time delta of: ", audio_time_delta * 1000, " ms")
+
+            self._latency_list.append(audio_time_delta)
+
+            if len(self._latency_list) > 1000:
+                self._latency_list = self._latency_list[:500]
+
+            self._average_latency.value = sum(self._latency_list)/len(self._latency_list)
         return
 
 

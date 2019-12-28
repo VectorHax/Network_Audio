@@ -5,50 +5,49 @@
 # The audio client server application
 # **********************************Import*********************************** #
 
-import sys
+# The global libraries built into python
+import time
+import queue
+import ctypes
+import socket
+import datetime
+import threading
+import multiprocessing
+from threading import Thread
 
-try:
-    # The global libraries built into python
-    import time
-    import queue
-    import socket
-    import threading
-    import multiprocessing
-    from threading import Thread
+# The brought in libraries via pip
+import pydub
 
-    # The brought in libraries via pip
-    import pydub
-
-    # The local libraries
-    from network_audio_classes import constants
-    from network_audio_classes import util_func
-    from network_audio_classes.audio_player_process import AudioPlayer
-    from network_audio_classes.client_socket_thread import ClientSocketThread
-    from network_audio_classes.server_network_process import ServerNetworkProcess
-
-except Exception as import_failure:
-    print("Audio Server Application failed to import: ", str(import_failure))
-    sys.exit()
+# The local libraries
+from network_audio_classes import constants
+from network_audio_classes import util_func
+from network_audio_classes.audio_player_process import AudioPlayer
+from network_audio_classes.client_socket_thread import ClientSocketThread
+from network_audio_classes.server_network_process import ServerNetworkProcess
 
 
 # *************************Audio Server Application************************** #
 
 class AudioServerApplication(multiprocessing.Process):
-    PROCESS_NAME = "Audio Server Application"
+    PROCESS_NAME: str = "Audio Server Application"
 
-    def __init__(self, audio_location):
+    def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
 
-        self._audio_location = audio_location
-        self._audio_file = pydub.AudioSegment.from_wav(self._audio_location)
-        self._audio_data = self._audio_file.raw_data
+        self._audio_location: str = ""
+
+        self._audio_file: pydub.AudioSegment
+        self._audio_file = None
+
+        self._audio_data: bytes = bytes([])
 
         self._prev_audio_index = 0
         self._current_audio_index = constants.AUDIO_BYTE_FRAME_SIZE
 
+        self._network_process: ServerNetworkProcess
         self._network_process = None
 
-        self._server_running = multiprocessing.Value("b", True)
+        self._server_running = multiprocessing.Value(ctypes.c_bool, True)
         return
 
     def run(self):
@@ -66,10 +65,14 @@ class AudioServerApplication(multiprocessing.Process):
 
             else:
                 try:
+                    current_time = datetime.datetime.now()
+
                     audio_data_chunk = self._audio_data[self._prev_audio_index:
                                                         self._current_audio_index]
                     audio_message = {constants.AUDIO_PAYLOAD_STR:
                                      list(audio_data_chunk)}
+                    audio_message.update({constants.TIMESTAMP_STR:
+                                          current_time.strftime("%Y-%m-%d %H:%M:%S.%f")})
                     self._network_process.add_audio_packet(audio_message, True)
 
                     self._prev_audio_index = self._current_audio_index

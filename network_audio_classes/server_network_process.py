@@ -23,9 +23,9 @@ from network_audio_classes.client_socket_thread import ClientSocketThread
 
 
 class ServerNetworkProcess(multiprocessing.Process):
-    PROCESS_NAME = "Server Network Process"
+    PROCESS_NAME: str = "Server Network Process"
 
-    QUEUE_DEPTH = 3
+    QUEUE_DEPTH: int = 3
 
     def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)

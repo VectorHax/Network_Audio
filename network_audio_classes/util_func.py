@@ -11,7 +11,7 @@ IP_TEST_INDEX = 0
 IP_DEFAULT_ADDRESS = "127.0.0.1"
 
 
-def get_own_ip():
+def get_own_ip() -> str:
     temp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
