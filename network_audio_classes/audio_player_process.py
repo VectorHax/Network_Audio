@@ -6,61 +6,54 @@
 
 # **********************************Import*********************************** #
 
-import sys
+# The global native python imports
+import queue
+import ctypes
+import multiprocessing
 
-try:
-    # The global native python imports
-    import math
-    import queue
-    import datetime
-    import threading
-    import multiprocessing
+# The imports brought in via pip
+import pydub
+import pyaudio
 
-    # The imports brought in via pip
-    import pydub
-    import pyaudio
-
-    # The local libraries
-    from network_audio_classes import constants
-
-except Exception as import_error:
-    print("Audio Player Thread failed to import: ", import_error)
-    sys.exit()
+# The local libraries
+from network_audio_classes import constants
 
 
 # ***********************Audio Player Thread Class************************** #
 
 class AudioPlayer(multiprocessing.Process):
-    PROCESS_NAME = "Audio Player"
+    PROCESS_NAME: str = "Audio Player"
 
     # Class wide static variables
-    AUDIO_REQUEST_ASSERT = "Audio Request must be a dict"
-    LOCATION_ASSERT = "Location must be a float"
-    AUDIO_DATA_ASSERT = "Audio Data must be bytes"
+    AUDIO_REQUEST_ASSERT: str = "Audio Request must be a dict"
+    LOCATION_ASSERT: str = "Location must be a float"
+    AUDIO_DATA_ASSERT: str = "Audio Data must be bytes"
 
-    LOCATION_MIN = -1.0
-    LOCATION_MAX = 1.0
+    LOCATION_MIN: float = -1.0
+    LOCATION_MAX: float = 1.0
 
-    REQ_QUEUE_SIZE = 10
-    AUDIO_QUEUE_SIZE = 30
+    REQ_QUEUE_SIZE: int = 10
+    AUDIO_QUEUE_SIZE: int = 30
 
     def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
 
-        self._audio_player = pyaudio.PyAudio()
+        self._audio_player: pyaudio.PyAudio
+        self._audio_streamer: pyaudio.PyAudio
 
         self._audio_player = None
         self._audio_streamer = None
+
         self._temp_audio_segment = self._create_empty_audio_segment()
 
         self._audio_data_queue = multiprocessing.Queue(self.AUDIO_QUEUE_SIZE)
         self._audio_request_queue = multiprocessing.Queue(self.REQ_QUEUE_SIZE)
 
         self._blank_audio_data = self._create_empty_audio_data()
-        self._speaker_location = multiprocessing.Value("f", 0.0)
+        self._speaker_location = multiprocessing.Value(ctypes.c_float, 0.0)
 
-        self._audio_player_running = multiprocessing.Value("b", True)
-        self._debug_flag = multiprocessing.Value("b", False)
+        self._audio_player_running = multiprocessing.Value(ctypes.c_bool, True)
+        self._debug_flag = multiprocessing.Value(ctypes.c_bool, False)
         return
 
     def run(self):
@@ -88,12 +81,12 @@ class AudioPlayer(multiprocessing.Process):
         self.join()
         return
 
-    def add_audio_request(self, audio_request):
+    def add_audio_request(self, audio_request: dict) -> None:
         assert isinstance(audio_request, dict), self.AUDIO_REQUEST_ASSERT
         self._audio_request_queue.put(audio_request)
         return
 
-    def set_speaker_location(self, location):
+    def set_speaker_location(self, location: float) -> None:
         assert isinstance(location, float), self.LOCATION_ASSERT
 
         if location < self.LOCATION_MIN:
@@ -105,17 +98,17 @@ class AudioPlayer(multiprocessing.Process):
 
         return
 
-    def wait_for_audio_player(self):
+    def wait_for_audio_player(self) -> None:
         while self._audio_data_queue.full():
             pass
         return
 
     @property
-    def pending_audio_buffers(self):
+    def pending_audio_buffers(self) -> int:
         return self._audio_data_queue.qsize()
 
     @property
-    def pending_audio_requests(self):
+    def pending_audio_requests(self) -> int:
         return self._audio_request_queue.qsize()
 
     def _init_audio_player(self):
@@ -142,7 +135,7 @@ class AudioPlayer(multiprocessing.Process):
         return audio_data, pyaudio.paContinue
 
     @staticmethod
-    def _create_empty_audio_segment():
+    def _create_empty_audio_segment() -> pydub.AudioSegment:
         audio_seg = pydub.AudioSegment(data=bytes(),
                                        sample_width=constants.AUDIO_SEG_WIDTH,
                                        frame_rate=constants.AUDIO_RATE,
@@ -150,11 +143,11 @@ class AudioPlayer(multiprocessing.Process):
         return audio_seg
 
     @staticmethod
-    def _create_empty_audio_data():
+    def _create_empty_audio_data() -> bytes:
         empty_audio_array = [1] * constants.AUDIO_BYTE_FRAME_SIZE
         return bytes(empty_audio_array)
 
-    def _handle_audio_packet(self, audio_data_packet):
+    def _handle_audio_packet(self, audio_data_packet: dict) -> None:
         speaker_location = audio_data_packet.get(constants.SPEAKER_LOC_STR)
         new_audio_data = audio_data_packet.get(constants.AUDIO_PAYLOAD_STR)
 
@@ -166,7 +159,7 @@ class AudioPlayer(multiprocessing.Process):
 
         return
 
-    def _set_audio_data(self, audio_data):
+    def _set_audio_data(self, audio_data: bytes) -> None:
         assert isinstance(audio_data, bytes), self.AUDIO_DATA_ASSERT
 
         audio_start_index = 0
@@ -179,6 +172,7 @@ class AudioPlayer(multiprocessing.Process):
 
             self._temp_audio_segment._data = frame_audio_data
             pan_offset = self._speaker_location.value
+            # noinspection PyUnresolvedReferences
             panned_audio = self._temp_audio_segment.pan(pan_offset)
 
             audio_start_index = audio_end_index
@@ -188,7 +182,7 @@ class AudioPlayer(multiprocessing.Process):
 
         return
 
-    def _empty_audio_queues(self):
+    def _empty_audio_queues(self) -> None:
 
         while not self._audio_request_queue.empty():
             self._audio_request_queue.get()
@@ -198,7 +192,7 @@ class AudioPlayer(multiprocessing.Process):
 
         return
 
-    def _stop_audio_player(self):
+    def _stop_audio_player(self) -> None:
         self._audio_streamer.stop_stream()
         self._audio_streamer.close()
         self._audio_player.terminate()

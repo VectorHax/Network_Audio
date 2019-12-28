@@ -18,7 +18,7 @@ class AudioGUIServerApplication:
     WINDOW_NAME = "Audio Server Application"
 
     AUDIO_FOLDER_NAME = "audio"
-    SUPPORTED_FORMATS = [".wav"]
+    SUPPORTED_FORMATS = [".wav", ".mp3"]
 
     PROGRESS_BAR_SIZE = 200
     LOOP_FREQUENCY = 22

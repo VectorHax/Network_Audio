@@ -15,8 +15,8 @@ if __name__ == '__main__':
     test_audio_player_left.set_speaker_location(1.0)
     test_audio_player_right.set_speaker_location(-1.0)
 
-    file_location = "audio/sample.wav"
-    audio_file = pydub.AudioSegment.from_wav(file_location)
+    file_location = "audio/sample.mp3"
+    audio_file = pydub.AudioSegment.from_mp3(file_location)
     audio_data = audio_file.raw_data
 
     playback_len = int(len(audio_data) / 10)
