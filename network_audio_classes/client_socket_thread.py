@@ -23,6 +23,10 @@ class ClientSocketThread(threading.Thread):
     THREAD_NAME: str = "Client Socket Thread"
 
     SOCKET_TIMEOUT: float = .5
+    STARTING_BRACKET_CHAR: bytes = b'{'
+    ENDING_BRACKET_CHAR: bytes = b'}'
+    NEW_LINE_CHAR: bytes = b'\n'
+    NONE_CHAR: bytes = b''
     TERMINATING_CHARS: list = [b'\n', b'}', b'']
     STATUS_KEY: str = "Network_Alive"
     RESPONSE_MSG: dict = {"Network_Alive": True}
@@ -122,19 +126,25 @@ class ClientSocketThread(threading.Thread):
 
         read_char = self._client_socket.recv(1)
 
-        if read_char == b'{':
+        if read_char == self.STARTING_BRACKET_CHAR:
+            starting_bracket_seen = 1
+            ending_bracket_seen = 0
+
             message_buffer += read_char.decode()
 
-            while read_char not in self.TERMINATING_CHARS:
+            while starting_bracket_seen != ending_bracket_seen:
                 read_char = self._client_socket.recv(1)
                 message_buffer += read_char.decode()
 
+                if read_char == self.ENDING_BRACKET_CHAR:
+                    ending_bracket_seen += 1
+
             receive_message = literal_eval(message_buffer)
 
-        elif read_char != b'':
+        elif read_char != self.NONE_CHAR:
             length_str += read_char.decode()
 
-            while read_char not in self.TERMINATING_CHARS:
+            while read_char != self.NEW_LINE_CHAR:
                 read_char = self._client_socket.recv(1)
                 length_str += read_char.decode()
 

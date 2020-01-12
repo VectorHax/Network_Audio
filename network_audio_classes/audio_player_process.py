@@ -1,13 +1,13 @@
 # audio_player_process.py
 # Created by: VectorHax
-# Created on: June 1st
+# Created on: January 12th, 2020
 
-# A thread that will manage playing audio
+# A process that will manage playing audio
 
 # **********************************Import*********************************** #
 
 # The global native python imports
-import queue
+import time
 import ctypes
 import multiprocessing
 
@@ -32,48 +32,50 @@ class AudioPlayer(multiprocessing.Process):
     LOCATION_MIN: float = -1.0
     LOCATION_MAX: float = 1.0
 
-    REQ_QUEUE_SIZE: int = 10
-    AUDIO_QUEUE_SIZE: int = 30
+    AUDIO_ARRAY_LEN: int = 10
+    AUDIO_ARRAY_SIZE: int = AUDIO_ARRAY_LEN * constants.AUDIO_BYTE_FRAME_SIZE
+
+    AUDIO_STEP_BUFFER: int = 5
 
     def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
 
-        self._audio_player: pyaudio.PyAudio
-        self._audio_streamer: pyaudio.PyAudio
-
-        self._audio_player = None
-        self._audio_streamer = None
-
-        self._temp_audio_segment = self._create_empty_audio_segment()
-
-        self._audio_data_queue = multiprocessing.Queue(self.AUDIO_QUEUE_SIZE)
-        self._audio_request_queue = multiprocessing.Queue(self.REQ_QUEUE_SIZE)
-
-        self._blank_audio_data: bytes = self._create_empty_audio_data()
         self._speaker_location = multiprocessing.Value(ctypes.c_float, 0.0)
 
+        self._audio_data_index = multiprocessing.Value(ctypes.c_ubyte, 0)
+        self._playback_data_index = multiprocessing.Value(ctypes.c_ubyte, 0)
+        self._audio_data_array = multiprocessing.Array(ctypes.c_ubyte,
+                                                       self.AUDIO_ARRAY_SIZE)
+
+        self._audio_data_requested = multiprocessing.Value(ctypes.c_ulong, 0)
+        self._audio_data_played = multiprocessing.Value(ctypes.c_ulong, 0)
+
         self._audio_player_running = multiprocessing.Value(ctypes.c_bool, True)
-        self._debug_flag = multiprocessing.Value(ctypes.c_bool, False)
+
+        self._debug_mode = multiprocessing.Value(ctypes.c_bool, False)
         return
 
     def run(self):
+        audio_frame_size = constants.AUDIO_FRAME_SIZE
 
-        self._audio_player, self._audio_streamer = self._init_audio_player()
-        self._audio_streamer.start_stream()
+        audio_player: pyaudio.PyAudio = pyaudio.PyAudio()
+
+        audio_streamer = audio_player.open(format=constants.AUDIO_FORMAT,
+                                           channels=constants.AUDIO_CHANNELS,
+                                           rate=constants.AUDIO_RATE,
+                                           frames_per_buffer=audio_frame_size,
+                                           output=True,
+                                           stream_callback=self._audio_callback)
+
+        audio_streamer.start_stream()
 
         while self._audio_player_running.value:
-            try:
-                audio_data_packet = self._audio_request_queue.get(True, 1.0)
-                self._handle_audio_packet(audio_data_packet)
+            time.sleep(.001)
 
-            except queue.Empty:
-                pass
+        audio_streamer.stop_stream()
+        audio_streamer.close()
 
-            except Exception as packet_handle_error:
-                print("Got the error with packet: ", packet_handle_error)
-
-        self._empty_audio_queues()
-        self._stop_audio_player()
+        audio_player.terminate()
         return
 
     def stop(self):
@@ -81,9 +83,18 @@ class AudioPlayer(multiprocessing.Process):
         self.join()
         return
 
-    def add_audio_request(self, audio_request: dict) -> None:
-        assert isinstance(audio_request, dict), self.AUDIO_REQUEST_ASSERT
-        self._audio_request_queue.put(audio_request)
+    def add_audio_data(self, audio_data: bytes) -> None:
+        audio_seg: pydub.AudioSegment = self._create_audio_segment(audio_data)
+
+        # noinspection PyUnresolvedReferences
+        panned_audio_segment = audio_seg.pan(self._speaker_location.value)
+        panned_audio_data: bytes = panned_audio_segment.raw_data
+
+        self._set_audio_data(self._audio_data_index.value, panned_audio_data)
+
+        self._increase_data_index(self._audio_data_index)
+
+        self._audio_data_requested.value += 1
         return
 
     def set_speaker_location(self, location: float) -> None:
@@ -99,101 +110,89 @@ class AudioPlayer(multiprocessing.Process):
         return
 
     def wait_for_audio_player(self) -> None:
-        while self._audio_data_queue.full():
-            pass
+        while self.audio_data_delta >= self.AUDIO_STEP_BUFFER:
+            time.sleep(.001)
+        return
+
+    def enable_debug_mode(self) -> None:
+        self._debug_mode.value = True
+        return
+
+    def disable_debug_mode(self) -> None:
+        self._debug_mode = False
         return
 
     @property
-    def pending_audio_buffers(self) -> int:
-        return self._audio_data_queue.qsize()
+    def audio_data_requested(self) -> int:
+        return self._audio_data_requested.value
 
     @property
-    def pending_audio_requests(self) -> int:
-        return self._audio_request_queue.qsize()
+    def audio_data_played(self) -> int:
+        return self._audio_data_played.value
 
-    def _init_audio_player(self):
-        audio_player = pyaudio.PyAudio()
+    @property
+    def audio_data_delta(self) -> int:
+        data_delta: int = 0
+        if self.audio_data_played > self.audio_data_requested:
+            # This is the case of audio data overflowed
+            data_played_max_value: int = 2 ** 64 - 1
+            data_delta = data_played_max_value - self.audio_data_played
+            data_delta -= self.audio_data_requested
+        else:
+            data_delta = self.audio_data_requested - self.audio_data_played
+        return data_delta
 
-        audio_streamer = audio_player.open(format=constants.AUDIO_FORMAT,
-                                           channels=constants.AUDIO_CHANNELS,
-                                           rate=constants.AUDIO_RATE,
-                                           output=True,
-                                           stream_callback=self._audio_callback)
-        return audio_player, audio_streamer
-
-    def _audio_callback(self, in_data, frame_count, time_info, status):
-
-        try:
-            audio_data = self._audio_data_queue.get_nowait()
-
-        except queue.Empty:
-            audio_data = self._blank_audio_data
-
-        if self._debug_flag.value:
-            print("Audio Callback: ", in_data, frame_count, time_info, status)
-
-        return audio_data, pyaudio.paContinue
+    @property
+    def debug_mode(self) -> bool:
+        return self._debug_mode.value
 
     @staticmethod
-    def _create_empty_audio_segment() -> pydub.AudioSegment:
-        audio_seg = pydub.AudioSegment(data=bytes(),
+    def _create_audio_segment(data: bytes = bytes()) -> pydub.AudioSegment:
+        audio_seg = pydub.AudioSegment(data=data,
                                        sample_width=constants.AUDIO_SEG_WIDTH,
                                        frame_rate=constants.AUDIO_RATE,
                                        channels=constants.AUDIO_CHANNELS)
         return audio_seg
 
     @staticmethod
-    def _create_empty_audio_data() -> bytes:
-        empty_audio_array = [1] * constants.AUDIO_BYTE_FRAME_SIZE
-        return bytes(empty_audio_array)
+    def _get_start_stop_points(index: int) -> (int, int):
+        array_start_point = index * constants.AUDIO_BYTE_FRAME_SIZE
+        array_end_point = array_start_point + constants.AUDIO_BYTE_FRAME_SIZE
+        return array_start_point, array_end_point
 
-    def _handle_audio_packet(self, audio_data_packet: dict) -> None:
-        speaker_location = audio_data_packet.get(constants.SPEAKER_LOC_STR)
-        new_audio_data = audio_data_packet.get(constants.AUDIO_PAYLOAD_STR)
+    def _get_audio_data(self, index: int) -> bytes:
+        array_start_point, array_end_point = self._get_start_stop_points(index)
+        audio_data = self._audio_data_array[array_start_point: array_end_point]
+        return bytes(audio_data)
 
-        if speaker_location:
-            self.set_speaker_location(speaker_location)
-
-        if new_audio_data:
-            self._set_audio_data(new_audio_data)
-
+    def _set_audio_data(self, index: int, audio_data: bytes) -> None:
+        array_start_point, array_end_point = self._get_start_stop_points(index)
+        self._audio_data_array[array_start_point: array_end_point] = audio_data
         return
 
-    def _set_audio_data(self, audio_data: bytes) -> None:
-        assert isinstance(audio_data, bytes), self.AUDIO_DATA_ASSERT
-
-        audio_start_index = 0
-        audio_end_index = constants.AUDIO_BYTE_FRAME_SIZE
-        audio_frame_parts = len(audio_data) / constants.AUDIO_BYTE_FRAME_SIZE
-        audio_frame_count = int(audio_frame_parts)
-
-        for audio_frame in range(audio_frame_count):
-            frame_audio_data = audio_data[audio_start_index:audio_end_index]
-
-            self._temp_audio_segment._data = frame_audio_data
-            pan_offset = self._speaker_location.value
-            # noinspection PyUnresolvedReferences
-            panned_audio = self._temp_audio_segment.pan(pan_offset)
-
-            audio_start_index = audio_end_index
-            audio_end_index += constants.AUDIO_BYTE_FRAME_SIZE
-
-            self._audio_data_queue.put(panned_audio.raw_data)
-
+    def _increase_data_index(self, data_index: multiprocessing.Value) -> None:
+        if (data_index.value + 1) == self.AUDIO_ARRAY_LEN:
+            data_index.value = 0
+        else:
+            data_index.value += 1
         return
 
-    def _empty_audio_queues(self) -> None:
+    def _audio_callback(self, in_data, frame_count, time_info, status):
 
-        while not self._audio_request_queue.empty():
-            self._audio_request_queue.get()
+        if self._playback_data_index.value != self._audio_data_index.value:
+            playback_index = self._playback_data_index.value
+            audio_data = self._get_audio_data(playback_index)
 
-        while not self._audio_data_queue.empty():
-            self._audio_data_queue.get()
+            self._increase_data_index(self._playback_data_index)
 
-        return
+            self._audio_data_played.value += 1
 
-    def _stop_audio_player(self) -> None:
-        self._audio_streamer.stop_stream()
-        self._audio_streamer.close()
-        self._audio_player.terminate()
-        return
+        else:
+            playback_index = self._playback_data_index.value
+            audio_data = self._get_audio_data(playback_index)
+
+        if self._debug_mode.value:
+            print("Audio_Callback in_data:", in_data, "frame_count:",
+                  frame_count, "time_info:", time_info, "status:", status)
+
+        return audio_data, pyaudio.paContinue

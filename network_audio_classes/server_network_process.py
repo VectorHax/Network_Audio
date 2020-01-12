@@ -1,5 +1,5 @@
 # server_network_process.py
-# Created by: Vectorhax
+# Created by: VectorHax
 # Created on: June 2nd, 2019
 
 # A network process that handles finding clients and sending out packets
@@ -7,7 +7,6 @@
 # **********************************Import*********************************** #
 
 # The global libraries built into python
-import time
 import queue
 import ctypes
 import socket
@@ -16,7 +15,6 @@ import multiprocessing
 
 # The local libraries
 from network_audio_classes import constants
-from network_audio_classes import util_func
 from network_audio_classes.client_socket_thread import ClientSocketThread
 
 # *************************Server Network Process*************************** #
@@ -25,7 +23,16 @@ from network_audio_classes.client_socket_thread import ClientSocketThread
 class ServerNetworkProcess(multiprocessing.Process):
     PROCESS_NAME: str = "Server Network Process"
 
-    QUEUE_DEPTH: int = 3
+    QUEUE_DEPTH: int = 10
+
+    IP_TEST_ADDRESS: str = "10.255.255.255"
+    IP_TEST_PORT: int = 1
+    IP_TEST_INDEX: int = 0
+    IP_DEFAULT_ADDRESS: str = "127.0.0.1"
+
+    GET_TIME: float = 1.0
+    SOCKET_BACKLOG: int = 5
+    SOCKET_TIMEOUT: float = 1.0
 
     def __init__(self):
         multiprocessing.Process.__init__(self, name=self.PROCESS_NAME)
@@ -37,8 +44,7 @@ class ServerNetworkProcess(multiprocessing.Process):
 
         self._server_ip: str = ""
 
-        self._server_socket: socket.socket
-        self._server_socket = None
+        self._server_socket: socket.socket = socket.socket()
 
         self._server_running = multiprocessing.Value(ctypes.c_bool, True)
         self._clients_connected = multiprocessing.Value(ctypes.c_uint64, 0)
@@ -70,7 +76,7 @@ class ServerNetworkProcess(multiprocessing.Process):
         assert isinstance(audio_packet, dict)
 
         if wait:
-            self._outgoing_message_queue.put(audio_packet, True, 1.0)
+            self._outgoing_message_queue.put(audio_packet, True, self.GET_TIME)
 
         else:
             if self._outgoing_message_queue.full():
@@ -114,17 +120,25 @@ class ServerNetworkProcess(multiprocessing.Process):
 
     def _create_server_socket(self) -> None:
         try:
-            self._server_ip = util_func.get_own_ip()
+            self._server_ip = self.get_own_ip()
             server_ip_info = (self._server_ip, constants.AUDIO_CLIENT_PORT)
             self._server_socket = socket.socket(socket.AF_INET,
                                                 socket.SOCK_STREAM)
             self._server_socket.bind(server_ip_info)
-            self._server_socket.listen(5)
-            self._server_socket.settimeout(1.0)
+
+            self._server_socket.listen(self.SOCKET_BACKLOG)
+            self._server_socket.settimeout(self.SOCKET_TIMEOUT)
 
         except Exception as create_err:
             print("Got an error creating server socket: ", create_err)
         return
+
+    def get_own_ip(self) -> str:
+        temp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        temp_socket.connect((self.IP_TEST_ADDRESS, self.IP_TEST_PORT))
+        device_ip = temp_socket.getsockname()[self.IP_TEST_INDEX]
+        temp_socket.close()
+        return device_ip
 
     def _accept_client(self) -> None:
         try:
